@@ -13,7 +13,8 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import tempfile
-import sounddevice as sd
+# FIXED: Replaced sounddevice with audio_recorder for Cloud compatibility
+from audio_recorder_streamlit import audio_recorder
 import whisper
 import os
 import torch
@@ -131,7 +132,7 @@ def load_models(model_size="base"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     SystemLog.log(f"Loading Models on device: {device}")
 
-    # 
+    # Initialize Whisper for ASR 
     try:
         whisper_model = whisper.load_model(model_size, device=device)
     except Exception as e:
@@ -152,7 +153,7 @@ def load_models(model_size="base"):
     toxicity_model = safe_pipeline_load("text-classification", "unitary/unbiased-toxic-roberta", device)
     summary_model = safe_pipeline_load("summarization", "facebook/bart-large-cnn", device)
     
-    # 
+    # Initialize Zero-Shot Topic Classifier (BART)
     topic_model = safe_pipeline_load("zero-shot-classification", "facebook/bart-large-mnli", device)
 
     # NLLB Translator (UPGRADED to 1.3B for better Kannada Accuracy)
@@ -165,7 +166,7 @@ def load_models(model_size="base"):
         SystemLog.log(f"Failed to load NLLB translation models: {e}", "ERROR")
         tokenizer, translator = None, None
 
-    # T5 Grammar Correction
+    # T5 Grammar Correction 
     try:
         grammar_tokenizer = AutoTokenizer.from_pretrained("vennify/t5-base-grammar-correction")
         grammar_model = AutoModelForSeq2SeqLM.from_pretrained("vennify/t5-base-grammar-correction").to(device)
@@ -368,24 +369,7 @@ def update_target_lang():
 # ---------------------------------------------------------
 # FILE SAVE / RECORDING FUNCTIONS
 # ---------------------------------------------------------
-def record_audio_filesafe(duration, fs=16000):
-    try:
-        st.info(f"🎙️ Recording for {duration} seconds…")
-        recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype="float32")
-        sd.wait()
-
-        recording = recording / (np.max(np.abs(recording)) + 1e-5)
-        tmp = tempfile.gettempdir()
-        # Use a unique ID for the file to prevent conflicts
-        path = os.path.join(tmp, f"record_{os.getpid()}.wav") 
-
-        write(path, fs, recording)
-        return path
-
-    except Exception as e:
-        st.error(f"Microphone Error: {e}")
-        return None
-
+# REMOVED: record_audio_filesafe (sounddevice dependency)
 
 def save_uploaded_file(uploaded_file):
     try:
@@ -477,12 +461,30 @@ with st.sidebar:
     input_method = st.radio("Choose Input:", ["🎤 Record", "📁 Upload"])
 
     if input_method == "🎤 Record":
-        dur = st.slider("Recording Duration (seconds)", 2, 60, 5)
-        if st.button("Start Recording"):
-            path = record_audio_filesafe(dur)
-            if path:
+        st.markdown("Click the microphone to record:")
+        # This component handles the recording in the browser
+        audio_bytes = audio_recorder(
+            text="",
+            recording_color="#e8b62c",
+            neutral_color="#6aa36f",
+            icon_name="microphone",
+            icon_size="2x",
+        )
+
+        if audio_bytes:
+            # Save the recorded bytes to a temporary file
+            try:
+                tmp = tempfile.gettempdir()
+                path = os.path.join(tmp, f"record_{os.getpid()}.wav")
+                with open(path, "wb") as f:
+                    f.write(audio_bytes)
+                
                 st.session_state.audio_path = path
                 st.session_state.analysis_results = None
+                st.success("Audio recorded successfully! Click 'Analyze Audio' to proceed.")
+                
+            except Exception as e:
+                st.error(f"Error saving recording: {e}")
 
     else:
         uploaded = st.file_uploader("Upload WAV/MP3/FLAC File:", type=["wav", "mp3", "flac"]) 
@@ -995,7 +997,8 @@ if st.session_state.analysis_results:
         # 
         img = generate_wordcloud(data["text"])
         if img is not None:
-            st.image(img, use_column_width=True)
+            # FIX: Updated deprecated use_column_width=True to "auto"
+            st.image(img, use_container_width=True)
         else:
             st.warning("Not enough distinct words found to generate a Word Cloud.")
 

@@ -3,7 +3,6 @@ numpy
 pandas
 matplotlib
 scipy
-sounddevice
 openai-whisper
 librosa
 nltk
@@ -15,3 +14,4 @@ reportlab
 sentencepiece
 accelerate
 protobuf
+audio-recorder-streamlit
