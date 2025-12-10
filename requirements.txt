@@ -1,0 +1,17 @@
+streamlit
+numpy
+pandas
+matplotlib
+scipy
+sounddevice
+openai-whisper
+librosa
+nltk
+wordcloud
+transformers
+torch
+gTTS
+reportlab
+sentencepiece
+accelerate
+protobuf
