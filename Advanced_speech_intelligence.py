@@ -1,8 +1,8 @@
 """
 PRO VOICE ANALYST
 =================
-Version: 1.5 (High-Accuracy Translation Update)
-Architecture: Streamlit + Whisper + HuggingFace Pipelines (NLLB-1.3B, T5, BART, Wav2Vec2)
+Version: 1.6 (Cloud Stable Edition)
+Architecture: Streamlit + Whisper + HuggingFace Pipelines (NLLB-600M, T5, BART, Wav2Vec2)
 Modules: ASR, Emotion, Sentiment, Toxicity, Summarization, Advanced Grammar, Zero-Shot Topic, S2S (gTTS)
 """
 
@@ -13,8 +13,6 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import tempfile
-# FIXED: Replaced sounddevice with audio_recorder for Cloud compatibility
-from audio_recorder_streamlit import audio_recorder
 import whisper
 import os
 import torch
@@ -29,6 +27,12 @@ import pandas as pd
 import io 
 import datetime 
 import difflib
+
+# Try importing the recorder; if missing, warn user instead of crashing
+try:
+    from audio_recorder_streamlit import audio_recorder
+except ImportError:
+    audio_recorder = None
 
 # ---------------------------------------------------------
 # PAGE SETTINGS
@@ -127,12 +131,12 @@ class SystemLog:
 # ---------------------------------------------------------
 # AI MODELS LOADING
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Initializing Models (Switching to High-Accuracy NLLB 1.3B)…")
+@st.cache_resource(show_spinner="Initializing Models (Optimized for Cloud)...")
 def load_models(model_size="base"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     SystemLog.log(f"Loading Models on device: {device}")
 
-    # Initialize Whisper for ASR 
+    # 
     try:
         whisper_model = whisper.load_model(model_size, device=device)
     except Exception as e:
@@ -153,20 +157,21 @@ def load_models(model_size="base"):
     toxicity_model = safe_pipeline_load("text-classification", "unitary/unbiased-toxic-roberta", device)
     summary_model = safe_pipeline_load("summarization", "facebook/bart-large-cnn", device)
     
-    # Initialize Zero-Shot Topic Classifier (BART)
+    # 
     topic_model = safe_pipeline_load("zero-shot-classification", "facebook/bart-large-mnli", device)
 
-    # NLLB Translator (UPGRADED to 1.3B for better Kannada Accuracy)
+    # NLLB Translator 
+    # NOTE: Switched to 600M to prevent Cloud Crash (1.3B is too large for free tier)
     try:
-        # Changed from 600M to 1.3B to fix "useless" -> "useful" semantic errors
-        nllb_model_name = "facebook/nllb-200-distilled-1.3B"
+        # 
+        nllb_model_name = "facebook/nllb-200-distilled-600M" 
         tokenizer = AutoTokenizer.from_pretrained(nllb_model_name)
         translator = AutoModelForSeq2SeqLM.from_pretrained(nllb_model_name).to(device)
     except Exception as e:
         SystemLog.log(f"Failed to load NLLB translation models: {e}", "ERROR")
         tokenizer, translator = None, None
 
-    # T5 Grammar Correction 
+    # T5 Grammar Correction
     try:
         grammar_tokenizer = AutoTokenizer.from_pretrained("vennify/t5-base-grammar-correction")
         grammar_model = AutoModelForSeq2SeqLM.from_pretrained("vennify/t5-base-grammar-correction").to(device)
@@ -369,8 +374,6 @@ def update_target_lang():
 # ---------------------------------------------------------
 # FILE SAVE / RECORDING FUNCTIONS
 # ---------------------------------------------------------
-# REMOVED: record_audio_filesafe (sounddevice dependency)
-
 def save_uploaded_file(uploaded_file):
     try:
         tmp = tempfile.gettempdir()
@@ -391,7 +394,7 @@ with st.sidebar:
     model_choice = st.selectbox(
         "Whisper Model Size:", 
         ["base (Fast)", "small (Balanced)", "medium (High Accuracy)"],
-        index=2
+        index=0 # Changed default to BASE for Cloud Stability
     )
     model_size = model_choice.split()[0]
 
@@ -448,7 +451,7 @@ with st.sidebar:
         "es": "Hola, esta es una frase en español.",
         "zh": "你好，这是中文句子。",
         "kn": "ನಮಸ್ಕಾರ, ಇದು ಕನ್ನಡ ವಾಕ್ಯ.", # KANNADA PROMPT
-        "ta": "வணக்கம், இது தமிழ் வாக்கியம்.", 
+        "ta": "வணக்கம், ಇದು தமிழ் ವಾಕ್ಯ.", 
         "te": "నమస్కారం, ఇది తెలుగు వాక్యం.", 
         "mr": "नमस्कार, हे मराठी वाक्य आहे.", 
         "bn": "নমস্কার, এটি বাংলা বাক্য।", 
@@ -461,30 +464,33 @@ with st.sidebar:
     input_method = st.radio("Choose Input:", ["🎤 Record", "📁 Upload"])
 
     if input_method == "🎤 Record":
-        st.markdown("Click the microphone to record:")
-        # This component handles the recording in the browser
-        audio_bytes = audio_recorder(
-            text="",
-            recording_color="#e8b62c",
-            neutral_color="#6aa36f",
-            icon_name="microphone",
-            icon_size="2x",
-        )
+        if audio_recorder is not None:
+            st.markdown("Click the microphone to record:")
+            # This component handles the recording in the browser
+            audio_bytes = audio_recorder(
+                text="",
+                recording_color="#e8b62c",
+                neutral_color="#6aa36f",
+                icon_name="microphone",
+                icon_size="2x",
+            )
 
-        if audio_bytes:
-            # Save the recorded bytes to a temporary file
-            try:
-                tmp = tempfile.gettempdir()
-                path = os.path.join(tmp, f"record_{os.getpid()}.wav")
-                with open(path, "wb") as f:
-                    f.write(audio_bytes)
-                
-                st.session_state.audio_path = path
-                st.session_state.analysis_results = None
-                st.success("Audio recorded successfully! Click 'Analyze Audio' to proceed.")
-                
-            except Exception as e:
-                st.error(f"Error saving recording: {e}")
+            if audio_bytes:
+                # Save the recorded bytes to a temporary file
+                try:
+                    tmp = tempfile.gettempdir()
+                    path = os.path.join(tmp, f"record_{os.getpid()}.wav")
+                    with open(path, "wb") as f:
+                        f.write(audio_bytes)
+                    
+                    st.session_state.audio_path = path
+                    st.session_state.analysis_results = None
+                    st.success("Audio recorded successfully! Click 'Analyze Audio' to proceed.")
+                    
+                except Exception as e:
+                    st.error(f"Error saving recording: {e}")
+        else:
+            st.error("Audio Recorder library not installed. Please add `audio-recorder-streamlit` to requirements.txt.")
 
     else:
         uploaded = st.file_uploader("Upload WAV/MP3/FLAC File:", type=["wav", "mp3", "flac"]) 
